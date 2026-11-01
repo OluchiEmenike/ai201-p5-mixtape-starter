@@ -38,6 +38,7 @@
 - For Issue #1, I asked AI to explain the Sunday weekday condition and help interpret the failing test. I checked the route, service, and test myself, confirmed the pre-fix failure, and used that evidence to guide the change.
 - For Issue #2, I used AI to reason about the difference between a rolling 24-hour window and the current calendar day. I verified the existing cutoff in the service and tested events on both sides of midnight.
 - For Issue #3, I used AI to explain how a SQL join affects result rows. I confirmed the query joined to the song-tags table and ran the multi-tag search test before making the change.
+- For Issue #4, I used AI to compare the rating and playlist-add call paths. I verified the missing notification step in the service and added tests for notifying a song's sharer and avoiding self-notifications.
 
 **Issue #2 — Friends Listening Now shows people from yesterday**
 
@@ -55,11 +56,13 @@
 - **My fix:** I removed the unnecessary join and its unused imports. The song's `to_dict()` method still provides its tags, so the response retains the tag list while each matching song is selected once.
 - **My side-effect check:** I ran `.\.venv\Scripts\python.exe -m pytest tests\test_search.py -q`. All five tests passed, covering matching searches, songs with zero, one, and multiple tags, and no-match searches. I also restarted the app and repeated the browser search; “Crown Heights Anthem” appeared once and still included its tags.
 
-## Issue #4 — How I reproduced it
+**Issue #4 — I got notified when a friend added my song to a playlist but not when they rated it**
 
-- **Setup:** I used Darius as the rater and a song shared by Nova.
-- **Rate:** I sent `POST /songs/<song_id>/rate` with `{"user_id":"<darius_id>","score":5}`. The app returned a saved rating with a score of 5.
-- **Check:** I opened `GET /users/<nova_id>/notifications`. It returned the existing playlist-add notification, but no notification about Darius rating Nova's song.
+- **How I reproduced it:** I used Darius as the rater and a song shared by Nova. I posted a score of 5 to `POST /songs/<song_id>/rate`, then checked `GET /users/<nova_id>/notifications`. The rating was saved, but Nova had no rating notification.
+- **How I found the root cause:** I traced the rating endpoint in `routes/songs.py` to `rate_song()` in `services/notification_service.py`. I compared it with `add_to_playlist()` in that same service, which creates a notification after a friend adds a song. `rate_song()` saved or updated the rating and committed it, then returned without creating a notification.
+- **The root cause:** The rating flow had no step to notify the song's sharer after a different user submitted a rating.
+- **My fix:** After saving the rating, `rate_song()` now uses the existing `create_notification()` helper to notify the song's sharer. It skips the notification when users rate their own songs.
+- **My side-effect check:** The two new notification tests pass, confirming that rating another user's song creates a notification with the rater, song, and score, while rating one's own song does not create a self-notification. The streak and search tests also pass (10 total). The full suite has two failures in the existing playlist-last-song tests for Issue #5; those are unrelated to this change.
 
 ## Issue #5 — How I reproduced it
 
