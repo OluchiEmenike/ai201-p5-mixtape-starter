@@ -27,17 +27,24 @@
 
 **Issue #1 — My listening streak keeps resetting**
 
-- **How I reproduced it:** On Sunday, I set the seeded user's streak to 12 and their last listen to Saturday. I posted a listen to an existing song at `POST /songs/<song_id>/listen`. The streak logic reset the streak instead of increasing it to 13. The existing Sunday regression test also reproduced this: it failed with a streak of 1 instead of 2.
-- **How I found the root cause:** I traced the listen request from `routes/songs.py` to `record_listening_event()` and then `update_listening_streak()` in `services/streak_service.py`. I read the Sunday test in `tests/test_streaks.py` and ran it before changing the code; it failed at the expected streak assertion. This pointed to the streak update condition rather than event creation or the route.
-- **The root cause:** `update_listening_streak()` only incremented when one day had passed and the current weekday was not Sunday. Python's `weekday()` returns `6` for Sunday, so a valid Saturday-to-Sunday consecutive listen missed the increment branch and fell through to the reset branch.
-- **My fix:** I removed the Sunday restriction. The streak now increments whenever exactly one calendar day has passed, regardless of the weekday. Same-day listens still do not add to the streak, and a gap of more than one day still resets it.
-- **My side-effect check:** I ran `tests/test_streaks.py`. Its cases check a new user's streak, consecutive-day listening, multiple listens on the same day, a skipped day, and the Saturday-to-Sunday boundary. All pass after the change.
-- **AI use:** I used AI to help explain the weekday condition and review the test result. I verified the cause against the route, service, and test code before changing the condition.
+- **How I reproduced it:** On Sunday, I set the seeded user's streak to 12 and their last listen to Saturday, then sent a listen request to `POST /songs/<song_id>/listen`. The streak reset to 1 instead of increasing to 13. Before changing the code, `tests/test_streaks.py` also failed its Saturday-to-Sunday check: it got 1 instead of the expected 2.
+- **How I found the root cause:** I followed the request from `routes/songs.py` to `record_listening_event()` and `update_listening_streak()` in `services/streak_service.py`. Then I ran the Sunday test in `tests/test_streaks.py` before making a change. The listen event was being recorded; the failure occurred when the streak update handled the Sunday date.
+- **The root cause:** The increment condition required both that one day had passed and that the current day was not Sunday. Python reports Sunday as `6` from `weekday()`, so a listen on Sunday skipped the increment and reached the reset branch.
+- **My fix:** I removed the weekday restriction. Now, if the last listen was exactly one calendar day earlier, the streak increments on any day. Same-day listens still leave the streak unchanged, and missing more than one day still resets it.
+- **My side-effect check:** I ran `.\.venv\Scripts\python.exe -m pytest tests\test_streaks.py -q`. All five tests passed, covering a new streak, consecutive days, multiple listens on one day, a skipped day, and listening Saturday then Sunday with a streak of 12 becoming 13.
 
-## Issue #2 — How I reproduced it
+## AI usage
 
-- **Setup:** The seed data makes Nova and Darius friends. I set Darius's latest listening event to 20 hours ago and moved his older events back two days.
-- **Check:** I opened `GET /feed/<nova_id>/listening-now`. Darius appeared in the results with his listen from the previous day, showing that yesterday's activity was still included.
+- For Issue #1, I asked AI to explain the Sunday weekday condition and help interpret the failing test. I checked the route, service, and test myself, confirmed the pre-fix failure, and used that evidence to guide the change.
+- For Issue #2, I used AI to reason about the difference between a rolling 24-hour window and the current calendar day. I verified the existing cutoff in the service and tested events on both sides of midnight.
+
+**Issue #2 — Friends Listening Now shows people from yesterday**
+
+- **How I reproduced it:** Using the seeded friendship between Nova and Darius, I set Darius's latest listen to 20 hours ago and moved his older listens back two days. I requested `GET /feed/<nova_id>/listening-now`. Darius still appeared with yesterday's listen.
+- **How I found the root cause:** I traced the feed endpoint in `routes/feed.py` to `get_friends_listening_now()` in `services/feed_service.py`. I compared the function's time cutoff with the issue's morning-after example: the query used the current time minus 24 hours, which includes late-evening listens from yesterday.
+- **The root cause:** The feed used a rolling 24-hour window rather than checking whether a listen happened on the current calendar day. A listen from 11 p.m. yesterday can therefore remain in the feed the next morning.
+- **My fix:** I changed the query window to start at midnight UTC today and end at the current time. This includes today's events and excludes yesterday's and future-dated events. The change is limited to `get_friends_listening_now()`; the activity feed is unchanged.
+- **My side-effect check:** I tested with one friend event from yesterday and another from today. Listening Now returned only today's event, while `get_activity_feed()` still returned both. I also ran `.\.venv\Scripts\python.exe -m pytest tests\test_streaks.py -q`; all five streak tests passed.
 
 ## Issue #3 — How I reproduced it
 
