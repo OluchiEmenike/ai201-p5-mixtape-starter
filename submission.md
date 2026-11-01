@@ -53,7 +53,7 @@
 - **How I found the root cause:** I traced the search endpoint in `routes/songs.py` to `search_songs()` in `services/search_service.py`. The search query filters on song title and artist, then joins each matching song to its rows in the song-tags table. The multi-tag test in `tests/test_search.py` confirmed that this produced three result rows for the song.
 - **The root cause:** The query joined songs to their tags even though search did not filter on tags. A song with three tag rows therefore appeared three times in the query results.
 - **My fix:** I removed the unnecessary join and its unused imports. The song's `to_dict()` method still provides its tags, so the response retains the tag list while each matching song is selected once.
-- **My side-effect check:** I ran `.\.venv\Scripts\python.exe -m pytest tests\test_search.py -q`. It checks matching searches, songs with zero, one, and multiple tags, and no-match searches.
+- **My side-effect check:** I ran `.\.venv\Scripts\python.exe -m pytest tests\test_search.py -q`. All five tests passed, covering matching searches, songs with zero, one, and multiple tags, and no-match searches. I also restarted the app and repeated the browser search; “Crown Heights Anthem” appeared once and still included its tags.
 
 ## Issue #4 — How I reproduced it
 
