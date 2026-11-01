@@ -86,11 +86,13 @@ def test_streak_increments_on_sunday(app, user):
     """
     with app.app_context():
         u = db.session.get(User, user.id)
+        u.listening_streak = 12
         saturday = datetime(2024, 6, 15, 12, 0, 0, tzinfo=timezone.utc)  # weekday() == 5
         sunday = datetime(2024, 6, 16, 12, 0, 0, tzinfo=timezone.utc)    # weekday() == 6
+        u.last_listened_at = saturday
 
         update_listening_streak(u, saturday)
-        assert u.listening_streak == 1
+        assert u.listening_streak == 12
 
         update_listening_streak(u, sunday)
-        assert u.listening_streak == 2  # Should increment, not reset
+        assert u.listening_streak == 13
