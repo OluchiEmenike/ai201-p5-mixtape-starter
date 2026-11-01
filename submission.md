@@ -39,6 +39,7 @@
 - For Issue #2, I used AI to reason about the difference between a rolling 24-hour window and the current calendar day. I verified the existing cutoff in the service and tested events on both sides of midnight.
 - For Issue #3, I used AI to explain how a SQL join affects result rows. I confirmed the query joined to the song-tags table and ran the multi-tag search test before making the change.
 - For Issue #4, I used AI to compare the rating and playlist-add call paths. I verified the missing notification step in the service and added tests for notifying a song's sharer and avoiding self-notifications.
+- For Issue #5, I used AI to help interpret the list slice in `get_playlist_songs()`. I verified the returned query results against the failing count and order tests before removing the slice.
 
 **Issue #2 — Friends Listening Now shows people from yesterday**
 
@@ -62,9 +63,12 @@
 - **How I found the root cause:** I traced the rating endpoint in `routes/songs.py` to `rate_song()` in `services/notification_service.py`. I compared it with `add_to_playlist()` in that same service, which creates a notification after a friend adds a song. `rate_song()` saved or updated the rating and committed it, then returned without creating a notification.
 - **The root cause:** The rating flow had no step to notify the song's sharer after a different user submitted a rating.
 - **My fix:** After saving the rating, `rate_song()` now uses the existing `create_notification()` helper to notify the song's sharer. It skips the notification when users rate their own songs.
-- **My side-effect check:** The two new notification tests pass, confirming that rating another user's song creates a notification with the rater, song, and score, while rating one's own song does not create a self-notification. The streak and search tests also pass (10 total). The full suite has two failures in the existing playlist-last-song tests for Issue #5; those are unrelated to this change.
+- **My side-effect check:** The two new notification tests pass, confirming that rating another user's song creates a notification with the rater, song, and score, while rating one's own song does not create a self-notification. The streak and search tests also pass (10 total).
 
-## Issue #5 — How I reproduced it
+**Issue #5 — The last song in a playlist never shows up**
 
-- **Setup:** I opened the seeded “Friday Energy” playlist, which contains seven songs.
-- **Check:** I requested `GET /playlists/<playlist_id>/songs`. The response had `count: 6` and listed six songs, so the playlist's last song was missing.
+- **How I reproduced it:** I opened the seeded “Friday Energy” playlist, which contains seven songs, using `GET /playlists/<playlist_id>/songs`. The response reported six songs and omitted the final one. The focused playlist tests also failed before the fix: a five-song playlist returned four songs, and its final title was missing from the ordered list.
+- **How I found the root cause:** I traced the playlist endpoint in `routes/playlists.py` to `get_playlist_songs()` in `services/playlist_service.py`. The database query returned songs ordered by position. The returned list was shortened afterward, which matched the missing-last-song symptom.
+- **The root cause:** The function serialized `songs[:-1]`, a Python slice that excludes the final item. This removed the last song regardless of playlist size.
+- **My fix:** I changed the return expression to serialize all queried songs. The query ordering and empty-playlist behavior remain unchanged.
+- **My side-effect check:** I ran `.\.venv\Scripts\python.exe -m pytest tests\test_playlists.py -q`. All three tests passed, covering all songs returned, correct ordering, and an empty playlist. I also ran the full suite with `.\.venv\Scripts\python.exe -m pytest tests -q`; all 15 tests passed.
