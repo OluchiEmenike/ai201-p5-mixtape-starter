@@ -37,6 +37,7 @@
 
 - For Issue #1, I asked AI to explain the Sunday weekday condition and help interpret the failing test. I checked the route, service, and test myself, confirmed the pre-fix failure, and used that evidence to guide the change.
 - For Issue #2, I used AI to reason about the difference between a rolling 24-hour window and the current calendar day. I verified the existing cutoff in the service and tested events on both sides of midnight.
+- For Issue #3, I used AI to explain how a SQL join affects result rows. I confirmed the query joined to the song-tags table and ran the multi-tag search test before making the change.
 
 **Issue #2 — Friends Listening Now shows people from yesterday**
 
@@ -46,11 +47,13 @@
 - **My fix:** I changed the query window to start at midnight UTC today and end at the current time. This includes today's events and excludes yesterday's and future-dated events. The change is limited to `get_friends_listening_now()`; the activity feed is unchanged.
 - **My side-effect check:** I tested with one friend event from yesterday and another from today. Listening Now returned only today's event, while `get_activity_feed()` still returned both. I also ran `.\.venv\Scripts\python.exe -m pytest tests\test_streaks.py -q`; all five streak tests passed.
 
-## Issue #3 — How I reproduced it
+**Issue #3 — The same song keeps showing up twice in search**
 
-- **Setup:** I used the seeded song “Crown Heights Anthem,” which has multiple tags.
-- **Search:** I opened `GET /songs/search?q=Anthem`.
-- **Result:** “Crown Heights Anthem” appeared more than once in the `results` list.
+- **How I reproduced it:** I searched for the seeded multi-tag song with `GET /songs/search?q=Anthem`. “Crown Heights Anthem” appeared three times in the results.
+- **How I found the root cause:** I traced the search endpoint in `routes/songs.py` to `search_songs()` in `services/search_service.py`. The search query filters on song title and artist, then joins each matching song to its rows in the song-tags table. The multi-tag test in `tests/test_search.py` confirmed that this produced three result rows for the song.
+- **The root cause:** The query joined songs to their tags even though search did not filter on tags. A song with three tag rows therefore appeared three times in the query results.
+- **My fix:** I removed the unnecessary join and its unused imports. The song's `to_dict()` method still provides its tags, so the response retains the tag list while each matching song is selected once.
+- **My side-effect check:** I ran `.\.venv\Scripts\python.exe -m pytest tests\test_search.py -q`. It checks matching searches, songs with zero, one, and multiple tags, and no-match searches.
 
 ## Issue #4 — How I reproduced it
 
